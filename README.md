@@ -48,3 +48,6 @@ php -S localhost:8080
 - 需要有效的Contact Flow ID和Instance ID
 - WebSocket连接用于实时消息接收
 - 建议在生产环境中使用HTTPS
+
+## 测试页面
+<img width="1676" alt="Image" src="https://github.com/user-attachments/assets/9c93d961-5c90-4e12-96b0-a74a8a2783be" />
