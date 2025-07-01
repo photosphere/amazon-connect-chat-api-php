@@ -1,0 +1,12 @@
+{
+    "name": "amazon/connect-chat-api-php",
+    "description": "Amazon Connect Chat API PHP Implementation",
+    "require": {
+        "aws/aws-sdk-php": "^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "": "src/"
+        }
+    }
+}

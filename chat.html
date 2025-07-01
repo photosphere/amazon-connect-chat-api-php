@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Amazon Connect Chat</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+      .chat-container {
+        max-width: 600px;
+        margin: 0 auto;
+      }
+      .config-section {
+        margin-bottom: 20px;
+        padding: 15px;
+        border: 1px solid #ddd;
+      }
+      .chat-box {
+        height: 400px;
+        border: 1px solid #ccc;
+        padding: 10px;
+        overflow-y: auto;
+        margin-bottom: 10px;
+      }
+      .message {
+        margin: 5px 0;
+        padding: 8px;
+        border-radius: 5px;
+      }
+      .user-message {
+        background: #007bff;
+        color: white;
+        text-align: right;
+      }
+      .agent-message {
+        background: #f1f1f1;
+      }
+      .input-section {
+        display: flex;
+        gap: 10px;
+      }
+      input[type="text"] {
+        flex: 1;
+        padding: 8px;
+      }
+      button {
+        padding: 8px 15px;
+        cursor: pointer;
+      }
+      .disabled {
+        opacity: 0.5;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="chat-container">
+      <h1>Amazon Connect Chat</h1>
+
+      <div class="config-section">
+        <h3>配置</h3>
+        <div>
+          <label>Contact Flow ID: </label>
+          <input
+            type="text"
+            id="contactFlowId"
+            placeholder="输入Contact Flow ID"
+          />
+        </div>
+        <div style="margin-top: 10px">
+          <label>Instance ID: </label>
+          <input type="text" id="instanceId" placeholder="输入Instance ID" />
+        </div>
+        <div style="margin-top: 10px">
+          <label>Display Name: </label>
+          <input
+            type="text"
+            id="displayName"
+            placeholder="输入显示名称"
+            value="Customer"
+          />
+        </div>
+        <button id="startChat" onclick="startChat()">开始聊天</button>
+      </div>
+
+      <div id="chatSection" class="disabled">
+        <div id="chatBox" class="chat-box"></div>
+        <div class="input-section">
+          <input
+            type="text"
+            id="messageInput"
+            placeholder="输入消息..."
+            onkeypress="handleKeyPress(event)"
+          />
+          <button onclick="sendMessage()">发送</button>
+          <button onclick="endChat()">结束聊天</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      class ChatClient {
+        constructor() {
+          this.connectionToken = null;
+          this.participantToken = null;
+          this.websocket = null;
+          this.isConnected = false;
+          this.loadSession();
+        }
+
+        saveSession() {
+          if (this.isConnected) {
+            const sessionData = {
+              connectionToken: this.connectionToken,
+              participantToken: this.participantToken,
+              websocketUrl: this.websocketUrl,
+              timestamp: Date.now(),
+            };
+            localStorage.setItem("chatSession", JSON.stringify(sessionData));
+          }
+        }
+
+        loadSession() {
+          const saved = localStorage.getItem("chatSession");
+          if (saved) {
+            try {
+              const sessionData = JSON.parse(saved);
+              // 检查会话是否在30分钟内
+              if (Date.now() - sessionData.timestamp < 30 * 60 * 1000) {
+                this.connectionToken = sessionData.connectionToken;
+                this.participantToken = sessionData.participantToken;
+                this.websocketUrl = sessionData.websocketUrl;
+                this.isConnected = true;
+
+                this.addMessage("系统", "恢复之前的聊天会话", "system");
+                this.isSessionRestore = true;
+                this.connectWebSocket(this.websocketUrl);
+                document
+                  .getElementById("chatSection")
+                  .classList.remove("disabled");
+                document.getElementById("startChat").disabled = true;
+              } else {
+                localStorage.removeItem("chatSession");
+              }
+            } catch (error) {
+              localStorage.removeItem("chatSession");
+            }
+          }
+        }
+
+        clearSession() {
+          localStorage.removeItem("chatSession");
+        }
+
+        async startChat(contactFlowId, instanceId, displayName) {
+          try {
+            const response = await fetch("chat-server.php", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: `action=start&contactFlowId=${contactFlowId}&instanceId=${instanceId}&displayName=${encodeURIComponent(
+                displayName
+              )}`,
+            });
+
+            const result = await response.json();
+            if (result.success) {
+              this.connectionToken = result.connectionToken;
+              this.participantToken = result.participantToken;
+              this.websocketUrl = result.websocketUrl;
+              this.isConnected = true;
+
+              this.saveSession();
+              this.addMessage("系统", "聊天已开始，正在连接客服...", "system");
+              this.connectWebSocket(result.websocketUrl);
+              return true;
+            } else {
+              this.addMessage("系统", "连接失败: " + result.error, "error");
+              return false;
+            }
+          } catch (error) {
+            this.addMessage("系统", "连接错误: " + error.message, "error");
+            return false;
+          }
+        }
+
+        async sendMessage(message) {
+          if (!this.isConnected || !message.trim()) return;
+
+          try {
+            const response = await fetch("chat-server.php", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: `action=send&connectionToken=${
+                this.connectionToken
+              }&message=${encodeURIComponent(message)}`,
+            });
+
+            const result = await response.json();
+            if (result.success) {
+            } else {
+              this.addMessage("系统", "发送失败: " + result.error, "error");
+            }
+          } catch (error) {
+            this.addMessage("系统", "发送错误: " + error.message, "error");
+          }
+        }
+
+        connectWebSocket(websocketUrl) {
+          this.websocket = new WebSocket(websocketUrl);
+
+          this.websocket.onopen = () => {
+            console.log("WebSocket连接已建立");
+            const subscribeMessage = JSON.stringify({
+              topic: "aws/subscribe",
+              content: { topics: ["aws/chat"] },
+            });
+            this.websocket.send(subscribeMessage);
+            if (!this.isSessionRestore) {
+              this.addMessage("系统", "WebSocket连接成功", "system");
+            }
+            this.isSessionRestore = false;
+          };
+
+          this.websocket.onmessage = (event) => {
+            console.log("=== WebSocket收到消息 ===");
+            console.log("原始数据:", event.data);
+            console.log("数据类型:", typeof event.data);
+            console.log("数据长度:", event.data.length);
+
+            try {
+              const data = JSON.parse(event.data);
+              console.log("解析后的JSON:", JSON.stringify(data, null, 2));
+              console.log("数据结构:", data);
+
+              // 显示所有属性
+              console.log("所有属性:", Object.keys(data));
+
+              // 处理WebSocket消息
+              if (data.topic === "aws/chat" && data.content) {
+                const messageData = JSON.parse(data.content);
+                const displayName =
+                  messageData.DisplayName ||
+                  messageData.ParticipantRole ||
+                  "未知用户";
+
+                if (messageData.Type === "MESSAGE" && messageData.Content) {
+                  if (messageData.ParticipantRole === "AGENT") {
+                    this.addMessage(displayName, messageData.Content, "agent");
+                  } else if (messageData.ParticipantRole === "CUSTOMER") {
+                    this.addMessage(displayName, messageData.Content, "user");
+                  }
+                } else if (
+                  messageData.ContentType ===
+                  "application/vnd.amazonaws.connect.event.typing"
+                ) {
+                  this.addMessage(
+                    "系统",
+                    displayName + " 正在输入...",
+                    "system"
+                  );
+                } else if (
+                  messageData.ContentType ===
+                  "application/vnd.amazonaws.connect.event.participant.joined"
+                ) {
+                  this.addMessage(
+                    "系统",
+                    displayName + " 加入了聊天",
+                    "system"
+                  );
+                }
+              }
+
+              console.log("=== 消息处理完成 ===");
+            } catch (error) {
+              console.error("解析WebSocket消息错误:", error);
+              console.log("无法解析的原始数据:", event.data);
+            }
+          };
+
+          this.websocket.onerror = (error) => {
+            console.error("WebSocket错误:", error);
+            // 只在非恢复会话时显示错误
+            if (!this.isSessionRestore) {
+              this.addMessage("系统", "WebSocket连接错误", "error");
+            }
+          };
+
+          this.websocket.onclose = () => {
+            console.log("WebSocket连接已关闭");
+          };
+        }
+
+        async endChat() {
+          if (!this.isConnected) return;
+
+          try {
+            await fetch("chat-server.php", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: `action=disconnect&connectionToken=${this.connectionToken}`,
+            });
+
+            this.isConnected = false;
+            if (this.websocket) {
+              this.websocket.close();
+            }
+
+            this.clearSession();
+            this.addMessage("系统", "聊天已结束", "system");
+            document.getElementById("chatSection").classList.add("disabled");
+            document.getElementById("startChat").disabled = false;
+          } catch (error) {
+            this.addMessage("系统", "结束聊天错误: " + error.message, "error");
+          }
+        }
+
+        addMessage(sender, content, type) {
+          const chatBox = document.getElementById("chatBox");
+          const messageDiv = document.createElement("div");
+          messageDiv.className = `message ${
+            type === "user" ? "user-message" : "agent-message"
+          }`;
+          messageDiv.innerHTML = `<strong>${sender}:</strong> ${content}`;
+          chatBox.appendChild(messageDiv);
+          chatBox.scrollTop = chatBox.scrollHeight;
+        }
+      }
+
+      const chatClient = new ChatClient();
+
+      async function startChat() {
+        const contactFlowId = document.getElementById("contactFlowId").value;
+        const instanceId = document.getElementById("instanceId").value;
+        const displayName =
+          document.getElementById("displayName").value || "Customer";
+
+        if (!contactFlowId || !instanceId) {
+          alert("请输入Contact Flow ID和Instance ID");
+          return;
+        }
+
+        document.getElementById("startChat").disabled = true;
+        const success = await chatClient.startChat(
+          contactFlowId,
+          instanceId,
+          displayName
+        );
+
+        if (success) {
+          document.getElementById("chatSection").classList.remove("disabled");
+        } else {
+          document.getElementById("startChat").disabled = false;
+        }
+      }
+
+      function sendMessage() {
+        const input = document.getElementById("messageInput");
+        const message = input.value.trim();
+
+        if (message) {
+          chatClient.sendMessage(message);
+          input.value = "";
+        }
+      }
+
+      function endChat() {
+        chatClient.endChat();
+      }
+
+      function handleKeyPress(event) {
+        if (event.key === "Enter") {
+          sendMessage();
+        }
+      }
+    </script>
+  </body>
+</html>
