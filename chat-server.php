@@ -120,7 +120,7 @@ class ChatServer {
             
             return [
                 'success' => true,
-                'transcript' => $result['Transcript'],
+                'transcripts' => $result['Transcript'],
                 'nextToken' => $result['NextToken'] ?? null
             ];
         } catch (Exception $e) {
@@ -184,6 +184,7 @@ switch ($action) {
         break;
         
     case 'transcript':
+    case 'get_transcripts':
         $connectionToken = $_POST['connectionToken'] ?? $_GET['connectionToken'];
         $nextToken = $_POST['nextToken'] ?? $_GET['nextToken'] ?? null;
         echo json_encode($chatServer->getTranscript($connectionToken, $nextToken));

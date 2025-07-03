@@ -117,13 +117,16 @@
               connectionToken: this.connectionToken,
               participantToken: this.participantToken,
               websocketUrl: this.websocketUrl,
+              contactFlowId: document.getElementById("contactFlowId").value,
+              instanceId: document.getElementById("instanceId").value,
+              displayName: document.getElementById("displayName").value,
               timestamp: Date.now(),
             };
             localStorage.setItem("chatSession", JSON.stringify(sessionData));
           }
         }
 
-        loadSession() {
+        async loadSession() {
           const saved = localStorage.getItem("chatSession");
           if (saved) {
             try {
@@ -135,8 +138,21 @@
                 this.websocketUrl = sessionData.websocketUrl;
                 this.isConnected = true;
 
+                // 恢复表单字段值
+                if (sessionData.contactFlowId) {
+                  document.getElementById("contactFlowId").value = sessionData.contactFlowId;
+                }
+                if (sessionData.instanceId) {
+                  document.getElementById("instanceId").value = sessionData.instanceId;
+                }
+                if (sessionData.displayName) {
+                  document.getElementById("displayName").value = sessionData.displayName;
+                }
+
                 this.addMessage("系统", "恢复之前的聊天会话", "system");
                 this.isSessionRestore = true;
+                // 先加载历史聊天记录
+                await this.loadTranscripts();
                 this.connectWebSocket(this.websocketUrl);
                 document
                   .getElementById("chatSection")
@@ -155,7 +171,15 @@
           localStorage.removeItem("chatSession");
         }
 
+        clearChatBox() {
+          const chatBox = document.getElementById("chatBox");
+          chatBox.innerHTML = "";
+        }
+
         async startChat(contactFlowId, instanceId, displayName) {
+          // 清空聊天框
+          this.clearChatBox();
+          
           try {
             const response = await fetch("chat-server.php", {
               method: "POST",
@@ -220,6 +244,8 @@
             this.websocket.send(subscribeMessage);
             if (!this.isSessionRestore) {
               this.addMessage("系统", "WebSocket连接成功", "system");
+              // 只在非会话恢复时加载聊天记录
+              this.loadTranscripts();
             }
             this.isSessionRestore = false;
           };
@@ -317,6 +343,42 @@
             document.getElementById("startChat").disabled = false;
           } catch (error) {
             this.addMessage("系统", "结束聊天错误: " + error.message, "error");
+          }
+        }
+
+        async loadTranscripts() {
+          console.log("开始加载聊天记录, connectionToken:", this.connectionToken);
+          if (!this.connectionToken) {
+            console.log("没有connectionToken，跳过加载聊天记录");
+            return;
+          }
+          
+          try {
+            const response = await fetch("chat-server.php", {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: `action=get_transcripts&connectionToken=${this.connectionToken}`,
+            });
+            
+            const result = await response.json();
+            console.log("加载聊天记录响应:", result);
+            if (result.success && result.transcripts) {
+              console.log("找到", result.transcripts.length, "条聊天记录");
+              result.transcripts.forEach(transcript => {
+                if (transcript.Type === "MESSAGE" && transcript.Content) {
+                  const displayName = transcript.DisplayName || transcript.ParticipantRole || "未知用户";
+                  if (transcript.ParticipantRole === "AGENT") {
+                    this.addMessage(displayName, transcript.Content, "agent");
+                  } else if (transcript.ParticipantRole === "CUSTOMER") {
+                    this.addMessage(displayName, transcript.Content, "user");
+                  }
+                }
+              });
+            } else {
+              console.log("没有找到聊天记录或请求失败");
+            }
+          } catch (error) {
+            console.error("加载聊天记录错误:", error);
           }
         }
 
