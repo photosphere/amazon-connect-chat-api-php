@@ -247,6 +247,9 @@
                   "未知用户";
 
                 if (messageData.Type === "MESSAGE" && messageData.Content) {
+                  // 删除"正在输入..."消息
+                  this.removeTypingMessage();
+                  
                   if (messageData.ParticipantRole === "AGENT") {
                     this.addMessage(displayName, messageData.Content, "agent");
                   } else if (messageData.ParticipantRole === "CUSTOMER") {
@@ -315,6 +318,16 @@
           } catch (error) {
             this.addMessage("系统", "结束聊天错误: " + error.message, "error");
           }
+        }
+
+        removeTypingMessage() {
+          const chatBox = document.getElementById("chatBox");
+          const messages = chatBox.querySelectorAll(".message");
+          messages.forEach(message => {
+            if (message.textContent.includes(" 正在输入...")) {
+              message.remove();
+            }
+          });
         }
 
         addMessage(sender, content, type) {

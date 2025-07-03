@@ -15,7 +15,7 @@
 
 1. 安装依赖：
 ```bash
-composer install
+php ./composer install
 ```
 
 2. 启动本地服务器：
